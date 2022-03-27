@@ -1,98 +1,115 @@
-# Maintainer: Marc Vertes <mvertes@free.fr>
-# Contributor: Filipp Andronov <filipp.andronov@gmail.com>
-pkgname=mongodb
-pkgver=3.6.7
+# Contributor: Justin Klaassen <jck112@users.noreply.github.com>
+# Maintainer: Justin Klaassen <jck112@users.noreply.github.com>
+pkgname=mongodb-org-server
+pkgver=3.6.23
 pkgrel=0
-pkgdesc='A high-performance, open source, schema-free document-oriented database'
-url='http://www.mongodb.org'
-arch='x86_64'
+pkgdesc="MongoDB database server"
+url="http://www.mongodb.org"
+arch="aarch64 x86_64"
 options="!check" # out of disk space (>35GB)
-license='AGPL3'
+license="SSPL-1.0"
 pkgusers="mongodb"
 pkggroups="mongodb"
-depends=
-makedepends="scons py-setuptools py2-cheetah py2-typing py2-yaml paxmark
-	libressl-dev pcre-dev snappy-dev boost-dev asio-dev libpcap-dev
-	snowball-dev zlib-dev cyrus-sasl-dev yaml-cpp-dev"
-install="$pkgname.pre-install"
-source="http://downloads.mongodb.org/src/mongodb-src-r${pkgver}.tar.gz
-	fix-backtrace.patch
-	fix-default-stacksize.patch
-	fix-elf-native-class.patch
-	fix-processinfo_linux.patch
-	fix-resolv.patch
-	fix-strerror_r.patch
-	wiredtiger.patch
+openrc_depends=tzdata
+makedepends_build="cyrus-sasl-dev libressl-dev python2-dev"
+makedepends_host="cyrus-sasl-dev libressl-dev linux-headers"
+subpackages="$pkgname-doc $pkgname-openrc"
 
-	mongodb.confd
-	mongodb.initd
-	mongodb.logrotate
-	mongos.confd
-	mongos.initd
-	"
+source="
+    http://downloads.mongodb.org/src/mongodb-src-r${pkgver}.tar.gz
 
-builddir="$srcdir"/$pkgname-src-r$pkgver
+    00-requirements.patch
+    05-SConstruct_crc.patch
+    10-dns_query_posix-impl.patch
+    15-errno_util.patch
+    20-processinfo_linux.patch
+    25-stacktrace_posix.patch
+    30-wiredtiger_config.patch
+    35-ssl_manager.patch
+    40-asio_context.patch
+    45-bid_functions.patch
+
+    mongod.initd
+    "
+
+builddir="$srcdir/mongodb-src-r$pkgver"
 _buildopts="
-	--allocator=system \
-	--disable-warnings-as-errors \
-	--use-system-boost \
-	--use-system-pcre \
-	--use-system-stemmer \
-	--use-system-snappy \
-	--use-system-zlib \
-	--use-system-yaml \
-	--use-sasl-client \
-	--ssl \
-	"
+    --jobs ${JOBS} \
+    --release \
+    --allocator=system \
+    --disable-warnings-as-errors \
+    --use-sasl-client \
+    --ssl \
+    TARGET_ARCH=${CTARGET_ARCH} \
+    CC=${CC} \
+    CXX=${CXX} \
+    "
+
+prepare() {
+    default_prepare
+
+    # ensure pip is installed and up-to-date
+    python2.7 -m ensurepip --upgrade
+
+    # install virtualenv if needed (no longer available as package)
+    python2.7 -m pip install virtualenv
+
+    # create a new virtualenv for python2
+    python2.7 -m virtualenv venv && source venv/bin/activate
+
+    # install buildscript python2 dependencies
+    python2.7 -m pip install -r buildscripts/requirements.txt
+}
 
 build() {
-	cd "$builddir"
-
-	export SCONSFLAGS="$MAKEFLAGS"
-	scons $_buildopts --prefix=$pkgdir/usr core
+    python2.7 buildscripts/scons.py $_buildopts mongod
 }
 
 check() {
-	cd "$builddir"
-
-	export SCONSFLAGS="$MAKEFLAGS"
-	scons $_buildopts unittests
-	python buildscripts/resmoke.py --suites=unittests --jobs=2
+    python2.7 buildscripts/scons.py $_buildopts unittests
+    python2.7 buildscripts/resmoke.py --jobs ${JOBS} --suites=unittests
 }
 
 package() {
-	cd "$builddir"
+    # install mongod binary
+    install -Dm755 mongod -t "$pkgdir/usr/bin"
 
-	# install mongo targets
-	export SCONSFLAGS="$MAKEFLAGS"
-	scons $_buildopts --prefix=$pkgdir/usr install
+    # install doc files
+    install -Dm644 distsrc/* -t "$pkgdir/usr/share/doc/$pkgname"
 
-	# java jit requires paxmark
-	paxmark -m "$pkgdir"/usr/bin/mongo*
-
-	# install alpine specific files
-	install -dm700 "$pkgdir/var/lib/mongodb"
-	install -dm755 "$pkgdir/var/log/mongodb"
-	chown mongodb:mongodb "$pkgdir/var/lib/mongodb" "$pkgdir/var/log/mongodb"
-
-	install -Dm755 "$srcdir/mongodb.initd" "$pkgdir/etc/init.d/mongodb"
-	install -Dm644 "$srcdir/mongodb.confd" "$pkgdir/etc/conf.d/mongodb"
-	install -Dm644 "$srcdir/mongodb.logrotate" "$pkgdir/etc/logrotate.d/mongodb"
-
-	install -Dm755 "$srcdir/mongos.initd" "$pkgdir/etc/init.d/mongos"
-	install -Dm644 "$srcdir/mongos.confd" "$pkgdir/etc/conf.d/mongos"
+    # install man files
+    install -Dm644 debian/mongod.1 -t "$pkgdir/usr/share/man/man1"
 }
 
-sha512sums="6d91785c5569f8b99ff7234fa94c7b87406489b1e04a9e1b44a2af6cbaf79e3685dbc361162935dc4b92bd07ed40bf024dba4ca85c1a4079dd22f1cdac91d594  mongodb-src-r3.6.7.tar.gz
-05c4331d028eb396e6cf52d96cdaa2af7199a03522e1a8211df2d36cb053ec093a51e9abf83c4dc00c09a0b1fa119a79bcc719fbc81a48f50ca1527c26613cf0  fix-backtrace.patch
-1492137b0e3456d90a79617c1cd5ead5c71b1cfaae9ee41c75d56cd25f404ec73a690f95ce0d8c064c0a14206daca8070aa769b7cdfa904a338a425b52c293fa  fix-default-stacksize.patch
-56db8f43afc94713ac65b174189e2dd903b5e1eff0b65f1bdac159e52ad4de6606c449865d73bd47bffad6a8fc339777e2b11395596e9a476867d94a219c7925  fix-elf-native-class.patch
-026d20fa1a0f1e27150b833664300250386d7e0d73c0778f81f70242e93e8a16e5607716693bbcdd1efb328fa84c7284e2c6c7e1ac92259b97a9d402975cf709  fix-processinfo_linux.patch
-aac12cffc452f1dc365c65944a015476c2011b0975144879d28938c690fe6e77b6bd672e040b4c04c02cb002224e24d6f13adb083324f424ef4cdb79a3a71f6b  fix-resolv.patch
-94078abfa74583afef6b5c1f0b334b257cfe87b0db7c13309a9c63d915913d5237c776dbb52f6a23e9409ec390d29e2f7225e9b8c8c5efcbc35b015c613f600c  fix-strerror_r.patch
-ecbe6cb579b33dd4888096712f150772db06fd38219ca2a7679b1dc1ee73b0c3f5ee498af12ecd0265b5231a9fe6b7c12b2c1d606ed04caa6aa00c3ad3fe925a  wiredtiger.patch
-9bcd870742c31bf25f34188ddc3c414de1103e9860dea9f54eee276b89bc2cf1226abab1749c5cda6a6fb0880e541373754e5e83d63cc7189d4b9c274fd555c3  mongodb.confd
-74009794d566dd9d70ec93ffd95c830ee4696165574ecf87398165637fb40799b38d182ef54c50fd0772d589be94ade7f7a49247f3d31c1f012cb4e44cc9f5df  mongodb.initd
-8c089b1a11f494e4148fb4646265964c925bf937633a65e395ee1361d42facf837871dd493a9a2e0f480ae0e0829dbd3ed60794c5334e2716332e131fc5c2c51  mongodb.logrotate
-61d8734cef644187eeadc821c89e63a3fbf61860fe2db6e74557b1c6760fe83ba7549cb04f9e3aacea4d8e7e4d81a3b1bc0d5e29715eca33c4761adb17ea9ab7  mongos.confd
-13aad7247b848ac58b2bc0b40a0d30d909e950380abd0c83fab0e2a394a42dc268a66dac53cf9feec6971739977470082cc4339cca827f41044cfe43803ef3f7  mongos.initd"
+openrc() {
+    default_openrc
+
+    install="$subpkgname.pre-install"
+
+    # install init files
+    install -Dm755 "$srcdir/mongod.initd" "$subpkgdir/etc/init.d/mongod"
+
+    # install conf files
+    install -Dm644 "$builddir/debian/mongod.conf" -t "$subpkgdir/etc"
+
+    # create db -- note: this should agree with dbpath in mongod.conf
+    install -o mongodb -g mongodb -d "$subpkgdir/var/lib/mongodb"
+
+    # create logdir -- note: this should agree with logpath in mongod.conf
+    install -o mongodb -g mongodb -d "$subpkgdir/var/log/mongodb"
+}
+
+sha512sums="
+35e0a145dc9988300b2023a6f98c0f0b701ddf032c5eb180be0dacc4b07512d2a1023f08aca1068b96783d8a121f3313ca0be5895f760fd1afc323418e5c402a  mongodb-src-r3.6.23.tar.gz
+f8a5d4b286dcd9e6d78c59ff8b5960ad1e34ba38b552213b5b318e0f82aef4496ac12faaa05f6f3b5570cc79e3b04cb8716d49ea35f647569866b77f29532abb  00-requirements.patch
+9e78ce2e5f303d28f938f24816baa68483642ff4ec64e9b19741e241f4662b809af9ba402d99d18ee03e454bda84b9cbb011ca69cb9a2bda861e71993f47b1b8  05-SConstruct_crc.patch
+fca508f7567c3c18827ac71e0e5327ef241c535f76d058c462fe75a0da1d906e63e4549a3bf7facedcd433c697dab6bf23e54d0a6e862d2911245c7e8710f0e2  10-dns_query_posix-impl.patch
+0c680aec751e38065782cadb32b1244469022beb649b9dedeaa8afadfb9501c888d3c604c0a266b5e11416419af44938ef4492aff5907bee743b44536e54d82e  15-errno_util.patch
+303448eda9564c895147d0d9e59fb9d6950252cd054fdfb8982b3c500f9cbdc08b165b87e1baef4b4a64d3df045867f434327b8fa7cd5bcd24f25c0d2e0f06d5  20-processinfo_linux.patch
+0ba5372ea79e5bd9e39e21034033b638c0aff4e9562f7f65ba8ba6590e4d6e232187134bef724487fc557d8c8c148f7532d3159ff297a32dfffcdce60249d232  25-stacktrace_posix.patch
+eb9771202391ab9d8da52f8eeb832b08418d7b585811e936dd8e909f1478043a3fcb200020da6cc5cc0b59ae4359e77da9c6a0b4cf77414f4d79a6f165d732dc  30-wiredtiger_config.patch
+074beebdeb3264241bd5d618cac2ca499a7986034f922ca139f6e37701222ba5b5112d8d606632a719510108ed809e6d2bb5bbc56bf4db1b68487010a638fc8b  35-ssl_manager.patch
+0866c004699ac60cc622849cf0daa12a36cf63700dfc8f467d0f940babddadf539aeff56ec4c2645ef9c6b0421a68a10c9aaba387716f32689c3e4ff94bbdb20  40-asio_context.patch
+e85ae84923c2002fe25065abead73586d7605c01fba833abd8f22beb647ea4e16b68e4ddd53bbada8f78658ddebdf055fb6949e0c2b4bfe63bf87392eeed3a83  45-bid_functions.patch
+079c0b2f521df51254b3faa82db19a4c28e676461e3e2e0e38f430c0ff85e756bb0d4d3353caa01ba75478320b44d4b14c585eb5266f560b4a5bfea92d49a2af  mongod.initd
+"
